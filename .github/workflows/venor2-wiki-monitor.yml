@@ -19,19 +19,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Fetch page
+      - name: Fetch API
+        id: fa
         run: |
-          curl -sL "$URL" | sed 's/<style[^>]*>.*<\/style>//g;s/<script[^>]*>.*<\/script>//g;s/<[^>]*>//g;s/&nbsp;//g;s/&amp;/\&/g' | tr -s ' ' | sed 's/^ *//;s/ *$//' > /tmp/pg.txt
-
-      - name: Parse
-        id: pa
-        run: |
-          T=$(cat /tmp/pg.txt); L=$(echo "$T" | tr '[:upper:]' '[:lower:]')
-          if echo "$L" | grep -q "hamarosan\|coming soon\|a tudastar epul\|nezz vissza"; then
-            echo "type=p" >> $GITHUB_OUTPUT
-          elif [ ${#T} -gt 100 ]; then
+          R=$(curl -s "$URL/api/items?locale=hu" 2>/dev/null || echo "[]")
+          T=$(echo "$R" | jq -r 'if type=="array" then length else 0 end' 2>/dev/null || echo "0")
+          H=$(echo "$R" | sha256sum | cut -d' ' -f1 || echo "err")
+          if [ "$T" -gt 10 ] 2>/dev/null; then
             echo "type=c" >> $GITHUB_OUTPUT
-            echo "hash=$(echo "$T" | sha256sum | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+            echo "hash=$H" >> $GITHUB_OUTPUT
+            echo "count=$T" >> $GITHUB_OUTPUT
           else
             echo "type=p" >> $GITHUB_OUTPUT
           fi
@@ -39,8 +36,8 @@ jobs:
       - name: Detect changes
         id: ch
         run: |
-          T=${{ steps.pa.outputs.type }}
-          H=${{ steps.pa.outputs.hash }}
+          T=${{ steps.fa.outputs.type }}
+          H=${{ steps.fa.outputs.hash }}
           C=false; N=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           CNT=0
           if [ -f docs/status.json ]; then
@@ -68,7 +65,7 @@ jobs:
 
       - name: Discord status embed
         env:
-          ST: ${{ steps.pa.outputs.type }}
+          ST: ${{ steps.fa.outputs.type }}
         run: |
           set +e
           HT=$(TZ='Europe/Budapest' date +"%Y.%m.%d %H:%M:%S" 2>/dev/null || date -d '+2 hours' +"%Y.%m.%d %H:%M:%S" 2>/dev/null || date -u +"%Y.%m.%d %H:%M:%S")
@@ -84,9 +81,9 @@ jobs:
           if [ -n "$ID" ]; then echo "$ID" > /tmp/msg_id; fi
 
       - name: Ping on real change
-        if: steps.ch.outputs.changed == 'true' && steps.pa.outputs.type == 'c'
+        if: steps.ch.outputs.changed == 'true' && steps.fa.outputs.type == 'c'
         env:
-          ST: ${{ steps.pa.outputs.type }}
+          ST: ${{ steps.fa.outputs.type }}
         run: |
           curl -s -X POST "$WH" -H "Content-Type: application/json" --data-raw '{"username":"Venor2 Wiki","content":"<@1469423126105297019> A wiki frissult! Nezz ra: https://wiki.venor2.hu/"}'
 
@@ -97,7 +94,7 @@ jobs:
           git config user.name "venor2-bot"
           git config user.email "venor2-bot@users.noreply.github.com"
           git add docs/status.json docs/.msg_id docs/.hash
-          if git diff --staged --quiet; then echo "No changes"; else git commit -m "s:${{ steps.pa.outputs.type }}"; git push origin main; fi
+          if git diff --staged --quiet; then echo "No changes"; else git commit -m "s:${{ steps.fa.outputs.type }}"; git push origin main; fi
 
       - name: Schedule next run
         uses: actions/github-script@v7
