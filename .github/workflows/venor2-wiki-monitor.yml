@@ -1,0 +1,113 @@
+name: Venor2 Wiki Monitor
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  URL: "https://wiki.venor2.hu/"
+  CACHE_KEY: venor2-wiki-state
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Oldal letöltése
+        id: fetch
+        run: |
+          CONTENT=$(curl -sL "${{ env.URL }}" | \
+            sed 's/<style[^>]*>.*<\/style>//g' | \
+            sed 's/<script[^>]*>.*<\/script>//g' | \
+            sed 's/<[^>]*>//g' | \
+            sed 's/&nbsp;//g; s/&amp;/\&/g' | \
+            tr -s ' ' | \
+            sed 's/^ *//; s/ *$//')
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          echo "$CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Tartalom elemzése
+        id: analyze
+        run: |
+          TEXT="${{ steps.fetch.outputs.content }}"
+          LEN=${#TEXT}
+          LOWER=$(echo "$TEXT" | tr '[:upper:]' '[:lower:]')
+
+          if echo "$LOWER" | grep -q "hamarosan\|coming soon\|a tudástár épül\|nézz vissza"; then
+            echo "type=placeholder" >> $GITHUB_OUTPUT
+          elif [ $LEN -gt 100 ]; then
+            HASH=$(echo "$TEXT" | sha256sum | cut -d' ' -f1)
+            echo "type=content" >> $GITHUB_OUTPUT
+            echo "hash=$HASH" >> $GITHUB_OUTPUT
+          else
+            echo "type=placeholder" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Utolsó hash betöltése
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: .wiki-state
+          key: ${{ env.CACHE_KEY }}
+
+      - name: Változás ellenőrzése és mentése
+        id: changed
+        run: |
+          if [ "${{ steps.analyze.outputs.type }}" != "content" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "Még nincs valódi tartalom."
+            exit 0
+          fi
+
+          NEW_HASH="${{ steps.analyze.outputs.hash }}"
+
+          if [ -f .wiki-state/hash.txt ]; then
+            OLD_HASH=$(cat .wiki-state/hash.txt)
+            if [ "$NEW_HASH" = "$OLD_HASH" ]; then
+              echo "changed=false" >> $GITHUB_OUTPUT
+              echo "Ugyanaz a tartalom, nincs változás."
+              exit 0
+            fi
+          fi
+
+          mkdir -p .wiki-state
+          echo "$NEW_HASH" > .wiki-state/hash.txt
+          echo "changed=true" >> $GITHUB_OUTPUT
+          echo "Tartalom megváltozott! Hash: $NEW_HASH"
+
+      - name: Issue létrehozása (értesítés)
+        if: steps.changed.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: ['wiki-frissult']
+            });
+            if (existing.length > 0) {
+              console.log('Már van nyitott issue, nem hozok létre újat.');
+              return;
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Venor2 Wiki frissult!',
+              body: [
+                'A wiki tartalma megvaltozott – mar nem a "Hamarosan" uzenet van.',
+                '',
+                '👉 ${{ env.URL }}',
+                '',
+                '_(Ezt automatikusan generalta a Venor2 Wiki Monitor.)_'
+              ].join('\n'),
+              labels: ['wiki-frissult']
+            });
+            console.log('Issue letrehozva!');
