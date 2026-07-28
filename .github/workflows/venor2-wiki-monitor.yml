@@ -42,19 +42,27 @@ jobs:
           T=${{ steps.pa.outputs.type }}
           H=${{ steps.pa.outputs.hash }}
           C=false; N=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          [ -f docs/status.json ] && CNT=$(grep -o '"c":[0-9]*' docs/status.json | grep -o '[0-9]*')
-          : "${CNT:=0}"; CNT=$((CNT+1))
-          LC=""; [ -f docs/status.json ] && LC=$(grep -o '"lc":"[^"]*"' docs/status.json | cut -d'"' -f4)
-
+          CNT=0
+          if [ -f docs/status.json ]; then
+            CNT=$(grep -o '"c":[0-9]*' docs/status.json | grep -o '[0-9]*' || echo 0)
+          fi
+          CNT=$((CNT+1))
+          LC=""
+          if [ -f docs/status.json ]; then
+            LC=$(grep -o '"lc":"[^"]*"' docs/status.json | cut -d'"' -f4 || echo "")
+          fi
           if [ "$T" = "c" ]; then
-            OH=""; [ -f docs/.hash ] && OH=$(cat docs/.hash)
-            [ "$H" != "$OH" ] && { C=true; LC=$N; }
+            OH=""
+            if [ -f docs/.hash ]; then OH=$(cat docs/.hash); fi
+            if [ "$H" != "$OH" ]; then C=true; LC=$N; fi
             echo "$H" > docs/.hash
           elif [ "$T" = "p" ]; then
-            OS=""; [ -f docs/status.json ] && OS=$(grep -o '"s":"[^"]*"' docs/status.json | cut -d'"' -f4)
-            [ "$OS" != "p" ] && C=true
+            OS=""
+            if [ -f docs/status.json ]; then
+              OS=$(grep -o '"s":"[^"]*"' docs/status.json | cut -d'"' -f4 || echo "")
+            fi
+            if [ "$OS" != "p" ]; then C=true; fi
           fi
-
           echo '{"s":"'"$T"'","lc":"'"${LC:-$N}"'","c":'"$CNT"'}' > docs/status.json
           echo "changed=$C" >> $GITHUB_OUTPUT
 
