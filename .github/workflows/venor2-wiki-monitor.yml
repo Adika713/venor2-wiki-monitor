@@ -83,11 +83,11 @@ jobs:
           [ -n "$ID" ] && echo "$ID" > /tmp/msg_id
 
       - name: Ping on real change
-        if: steps.ch.outputs.changed == 'true'
+        if: steps.ch.outputs.changed == 'true' && steps.pa.outputs.type == 'c'
         env:
           ST: ${{ steps.pa.outputs.type }}
         run: |
-          [ "$ST" = "c" ] && curl -s -X POST "$WH" -H "Content-Type: application/json" --data-raw '{"username":"Venor2 Wiki","content":"<@1469423126105297019> A wiki frissult! Nezz ra: https://wiki.venor2.hu/"}'
+          curl -s -X POST "$WH" -H "Content-Type: application/json" --data-raw '{"username":"Venor2 Wiki","content":"<@1469423126105297019> A wiki frissult! Nezz ra: https://wiki.venor2.hu/"}'
 
       - name: Commit status
         run: |
