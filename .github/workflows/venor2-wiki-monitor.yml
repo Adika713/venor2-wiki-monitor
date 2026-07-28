@@ -16,7 +16,6 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Oldal letöltése
-        id: fetch
         run: |
           curl -sL "${{ env.URL }}" | \
             sed 's/<style[^>]*>.*<\/style>//g' | \
@@ -25,7 +24,6 @@ jobs:
             sed 's/&nbsp;//g; s/&amp;/\&/g' | \
             tr -s ' ' | \
             sed 's/^ *//; s/ *$//' > /tmp/wiki-content.txt
-          echo "saved" >> $GITHUB_OUTPUT
 
       - name: Tartalom elemzése
         id: analyze
