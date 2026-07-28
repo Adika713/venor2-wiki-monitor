@@ -70,6 +70,7 @@ jobs:
         env:
           ST: ${{ steps.pa.outputs.type }}
         run: |
+          set +e
           HT=$(TZ='Europe/Budapest' date +"%Y.%m.%d %H:%M:%S" 2>/dev/null || date -d '+2 hours' +"%Y.%m.%d %H:%M:%S" 2>/dev/null || date -u +"%Y.%m.%d %H:%M:%S")
           CT=$(grep -o '"c":[0-9]*' docs/status.json | grep -o '[0-9]*' || echo "0")
           if [ "$ST" = "c" ]; then CL="5763719"; SI=":green_circle:"; SS="Van tartalom"
@@ -77,10 +78,10 @@ jobs:
 
           jq -n --arg u "Venor2 Wiki" --arg a "https://wiki.venor2.hu/favicon.ico" --argjson cl "$CL" --arg si "$SI" --arg ss "$SS" --arg ht "$HT" --arg ct "$CT" '{"username":$u,"avatar_url":$a,"embeds":[{"title":"Venor2 Wiki Status","color":$cl,"thumbnail":{"url":$a},"fields":[{"name":"Allapot","value":($si+" "+$ss),"inline":true},{"name":"Utolso ellenorzes","value":$ht,"inline":true},{"name":"Ellenorzesek szama","value":$ct,"inline":true},{"name":"Link","value":"[wiki.venor2.hu](https://wiki.venor2.hu/)","inline":false}],"footer":{"text":"GitHub Actions | 1 percenkent"},"timestamp":"'"$(date -u +"%Y-%m-%dT%H:%M:%SZ")"'"}]}' > /tmp/embed.json
 
-          [ -f docs/.msg_id ] && curl -s -X DELETE "$WH/messages/$(cat docs/.msg_id)" > /dev/null || true
+          [ -f docs/.msg_id ] && curl -s -X DELETE "$WH/messages/$(cat docs/.msg_id)" > /dev/null
           R=$(curl -s -X POST "$WH?wait=true" -H "Content-Type: application/json" -d @/tmp/embed.json)
           ID=$(echo "$R" | grep -o '"id":"[0-9]*"' | head -1 | cut -d'"' -f4)
-          [ -n "$ID" ] && echo "$ID" > /tmp/msg_id
+          if [ -n "$ID" ]; then echo "$ID" > /tmp/msg_id; fi
 
       - name: Ping on real change
         if: steps.ch.outputs.changed == 'true' && steps.pa.outputs.type == 'c'
