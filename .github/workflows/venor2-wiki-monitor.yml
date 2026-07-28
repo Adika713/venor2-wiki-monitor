@@ -96,26 +96,7 @@ jobs:
             COLOR=15548997; STATE_ICON=":red_circle:"; STATE="Meg nincs tartalom"
           fi
 
-          EMBED=$(cat <<ENDJSON
-        {
-          "username": "Venor2 Wiki",
-          "avatar_url": "https://wiki.venor2.hu/favicon.ico",
-          "embeds": [{
-            "title": "Venor2 Wiki Status",
-            "color": $COLOR,
-            "thumbnail": {"url": "https://wiki.venor2.hu/favicon.ico"},
-            "fields": [
-              {"name": "Allapot", "value": "$STATE_ICON $STATE", "inline": true},
-              {"name": "Utolso ellenorzes", "value": "$HU_TIME", "inline": true},
-              {"name": "Ellenorzesek szama", "value": "$COUNT", "inline": true},
-              {"name": "Link", "value": "[wiki.venor2.hu](https://wiki.venor2.hu/)", "inline": false}
-            ],
-            "footer": {"text": "GitHub Actions | 1 percenkent"},
-            "timestamp": "$NOW"
-          }]
-        }
-        ENDJSON
-        )
+          EMBED=$(printf '{"username":"Venor2 Wiki","avatar_url":"https://wiki.venor2.hu/favicon.ico","embeds":[{"title":"Venor2 Wiki Status","color":%s,"thumbnail":{"url":"https://wiki.venor2.hu/favicon.ico"},"fields":[{"name":"Allapot","value":"%s %s","inline":true},{"name":"Utolso ellenorzes","value":"%s","inline":true},{"name":"Ellenorzesek szama","value":"%s","inline":true},{"name":"Link","value":"[wiki.venor2.hu](https://wiki.venor2.hu/)","inline":false}],"footer":{"text":"GitHub Actions | 1 percenkent"},"timestamp":"%s"}]}' "$COLOR" "$STATE_ICON" "$STATE" "$HU_TIME" "$COUNT" "$NOW")
 
           # Régi üzenet törlése
           if [ -f docs/.msg_id ]; then
