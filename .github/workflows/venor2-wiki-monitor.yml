@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 env:
-  URL: https://wiki.venor2.hu/
-  WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+  URL: "https://wiki.venor2.hu/"
+  WH: "${{ secrets.DISCORD_WEBHOOK }}"
 
 jobs:
   check:
@@ -18,120 +18,78 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Oldal letöltése
+      - name: Fetch
         run: |
-          curl -sL "${{ env.URL }}" | \
-            sed 's/<style[^>]*>.*<\/style>//g' | \
-            sed 's/<script[^>]*>.*<\/script>//g' | \
-            sed 's/<[^>]*>//g' | \
-            sed 's/&nbsp;//g; s/&amp;/\&/g' | \
-            tr -s ' ' | \
-            sed 's/^ *//; s/ *$//' > /tmp/wiki-content.txt
+          curl -sL "$URL" | sed 's/<style[^>]*>.*<\/style>//g;s/<script[^>]*>.*<\/script>//g;s/<[^>]*>//g;s/&nbsp;//g;s/&amp;/\&/g' | tr -s ' ' | sed 's/^ *//;s/ *$//' > /tmp/pg.txt
 
-      - name: Tartalom elemzése
+      - name: Parse
         id: analyze
         run: |
-          TEXT=$(cat /tmp/wiki-content.txt)
-          LEN=${#TEXT}
-          LOWER=$(echo "$TEXT" | tr '[:upper:]' '[:lower:]')
-
-          if echo "$LOWER" | grep -q "hamarosan\|coming soon\|a tudastar epul\|nezz vissza"; then
+          T=$(cat /tmp/pg.txt)
+          L=$(echo "$T" | tr '[:upper:]' '[:lower:]')
+          if echo "$L" | grep -q "hamarosan\|coming soon\|a tudastar epul\|nezz vissza"; then
             echo "type=placeholder" >> $GITHUB_OUTPUT
-          elif [ $LEN -gt 100 ]; then
-            HASH=$(echo "$TEXT" | sha256sum | cut -d' ' -f1)
+          elif [ ${#T} -gt 100 ]; then
             echo "type=content" >> $GITHUB_OUTPUT
-            echo "hash=$HASH" >> $GITHUB_OUTPUT
+            echo "hash=$(echo "$T" | sha256sum | cut -d' ' -f1)" >> $GITHUB_OUTPUT
           else
             echo "type=placeholder" >> $GITHUB_OUTPUT
           fi
 
-      - name: Változás ellenőrzése és statikus fájlok frissítése
+      - name: Diff
         id: changed
         run: |
-          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          STATUS="${{ steps.analyze.outputs.type }}"
-          NEW_HASH="${{ steps.analyze.outputs.hash }}"
-          CHANGED=false
-
-          # check_count
-          COUNT=0
-          [ -f docs/status.json ] && COUNT=$(grep -o '"check_count":[0-9]*' docs/status.json | grep -o '[0-9]*')
-          : ${COUNT:=0}
-          COUNT=$((COUNT + 1))
-
-          # last_change
-          LAST_CHANGE=""
-          [ -f docs/status.json ] && LAST_CHANGE=$(grep -o '"last_change":"[^"]*"' docs/status.json | cut -d'"' -f4)
-
-          # Változás detektálás
-          if [ "$STATUS" = "content" ]; then
-            OLD_HASH=""
-            [ -f docs/.hash ] && OLD_HASH=$(cat docs/.hash)
-            if [ "$NEW_HASH" != "$OLD_HASH" ]; then
-              CHANGED=true; LAST_CHANGE=$NOW
-            fi
-            echo "$NEW_HASH" > docs/.hash
-          elif [ "$STATUS" = "placeholder" ]; then
-            OLD_STATUS=""
-            [ -f docs/status.json ] && OLD_STATUS=$(grep -o '"status":"[^"]*"' docs/status.json | cut -d'"' -f4)
-            [ "$OLD_STATUS" != "placeholder" ] && CHANGED=true
+          T="${{ steps.analyze.outputs.type }}"
+          H="${{ steps.analyze.outputs.hash }}"
+          C=false
+          N=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          [ -f docs/status.json ] && CNT=$(grep -o '"check_count":[0-9]*' docs/status.json | grep -o '[0-9]*')
+          : "${CNT:=0}"
+          CNT=$((CNT+1))
+          LC=""
+          [ -f docs/status.json ] && LC=$(grep -o '"last_change":"[^"]*"' docs/status.json | cut -d'"' -f4)
+          if [ "$T" = "content" ]; then
+            OH=""; [ -f docs/.hash ] && OH=$(cat docs/.hash)
+            if [ "$H" != "$OH" ]; then C=true; LC=$N; fi
+            echo "$H" > docs/.hash
+          elif [ "$T" = "placeholder" ]; then
+            OS=""; [ -f docs/status.json ] && OS=$(grep -o '"status":"[^"]*"' docs/status.json | cut -d'"' -f4)
+            [ "$OS" != "placeholder" ] && C=true
           fi
+          echo '{"status":"'"$T"'","last_check":"'"$N"'","last_change":"'"${LC:-$N}"'","check_count":'"$CNT"'}' > docs/status.json
+          echo "changed=$C" >> $GITHUB_OUTPUT
 
-          echo "{\"status\":\"$STATUS\",\"last_check\":\"$NOW\",\"last_change\":\"${LAST_CHANGE:-$NOW}\",\"check_count\":$COUNT}" > docs/status.json
-
-          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
-          echo "status=$STATUS" >> $GITHUB_OUTPUT
-
-      - name: Discord embed frissítése
+      - name: Discord embed
         env:
-          STATUS: ${{ steps.analyze.outputs.type }}
+          ST: "${{ steps.analyze.outputs.type }}"
         run: |
-          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          HU_TIME=$(TZ='Europe/Budapest' date +"%Y.%m.%d %H:%M:%S" 2>/dev/null || date -d '+2 hours' +"%Y.%m.%d %H:%M:%S")
-          COUNT=$(grep -o '"check_count":[0-9]*' docs/status.json | grep -o '[0-9]*' || echo "0")
-
-          if [ "$STATUS" = "content" ]; then
-            C=5763719; I=":green_circle:"; S="Van tartalom"
+          N=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          HT=$(TZ='Europe/Budapest' date +"%Y.%m.%d %H:%M:%S" 2>/dev/null || date -d '+2 hours' +"%Y.%m.%d %H:%M:%S" 2>/dev/null || echo "$N")
+          CT=$(grep -o '"check_count":[0-9]*' docs/status.json | grep -o '[0-9]*' || echo "0")
+          if [ "$ST" = "content" ]; then
+            CL="5763719"; SI=":green_circle:"; SS="Van tartalom"
           else
-            C=15548997; I=":red_circle:"; S="Meg nincs tartalom"
+            CL="15548997"; SI=":red_circle:"; SS="Meg nincs tartalom"
           fi
+          jq -n --arg u "Venor2 Wiki" --arg a "https://wiki.venor2.hu/favicon.ico" --argjson c "$CL" --arg i "$SI" --arg s "$SS" --arg t "$N" --arg h "$HT" --arg n "$CT" '{"username":$u,"avatar_url":$a,"embeds":[{"title":"Venor2 Wiki Status","color":$c,"thumbnail":{"url":$a},"fields":[{"name":"Allapot","value":($i+" "+$s),"inline":true},{"name":"Utolso ellenorzes","value":$h,"inline":true},{"name":"Ellenorzesek szama",value:$n,"inline":true},{"name":"Link","value":"[wiki.venor2.hu](https://wiki.venor2.hu/)","inline":false}],"footer":{"text":"GitHub Actions | 1 percenkent"},"timestamp":$t}]}' > /tmp/embed.json
+          [ -f docs/.msg_id ] && curl -s -X DELETE "$WH/messages/$(cat docs/.msg_id)" > /dev/null || true
+          R=$(curl -s -X POST "$WH?wait=true" -H "Content-Type: application/json" -d @/tmp/embed.json)
+          ID=$(echo "$R" | grep -o '"id":"[0-9]*"' | head -1 | cut -d'"' -f4)
+          [ -n "$ID" ] && echo "$ID" > docs/.msg_id
 
-          jq -n \
-            --arg u "Venor2 Wiki" \
-            --arg a "https://wiki.venor2.hu/favicon.ico" \
-            --arg c $C \
-            --arg i "$I" \
-            --arg s "$S" \
-            --arg t "$NOW" \
-            --arg h "$HU_TIME" \
-            --arg n "$COUNT" \
-            '{username:$u,avatar_url:$a,embeds:[{title:"Venor2 Wiki Status",color:$c|tonumber,thumbnail:{url:$a},fields:[{name:"Allapot",value:($i+" "+$s),inline:true},{name:"Utolso ellenorzes",value:$h,inline:true},{name:"Ellenorzesek szama",value:$n,inline:true},{name:"Link",value:"[wiki.venor2.hu](https://wiki.venor2.hu/)",inline:false}],footer:{text:"GitHub Actions | 1 percenkent"},timestamp:$t}]}' > /tmp/embed.json
-
-          if [ -f docs/.msg_id ]; then
-            OLD_MSG_ID=$(cat docs/.msg_id)
-            [ -n "$OLD_MSG_ID" ] && curl -s -X DELETE "${{ env.WEBHOOK }}/messages/$OLD_MSG_ID" > /dev/null || true
-          fi
-
-          RESPONSE=$(curl -s -X POST "${{ env.WEBHOOK }}?wait=true" \
-            -H "Content-Type: application/json" \
-            -d @/tmp/embed.json)
-          MSG_ID=$(echo "$RESPONSE" | grep -o '"id":"[0-9]*"' | head -1 | cut -d'"' -f4)
-          [ -n "$MSG_ID" ] && echo "$MSG_ID" > docs/.msg_id
-
-      - name: Discord ping ha valtozott
-        if: steps.changed.outputs.changed == 'true' && steps.analyze.outputs.type == 'content'
+      - name: Ping on change
+        if: steps.changed.outputs.changed == 'true'
+        env:
+          ST: "${{ steps.analyze.outputs.type }}"
         run: |
-          curl -s -X POST "${{ env.WEBHOOK }}" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "username": "Venor2 Wiki",
-              "content": "<@1469423126105297019> A wiki frissult! Nezz ra: https://wiki.venor2.hu/"
-            }' > /dev/null
+          if [ "$ST" = "content" ]; then
+            curl -s -X POST "$WH" -H "Content-Type: application/json" --data-raw '{"username":"Venor2 Wiki","content":"<@1469423126105297019> A wiki frissult! Nezz ra: https://wiki.venor2.hu/"}'
+          fi
 
       - name: Commit
         run: |
           git config user.name "venor2-bot"
           git config user.email "venor2-bot@users.noreply.github.com"
           git add docs/status.json docs/.hash docs/.msg_id
-          git diff --staged --quiet || git commit -m "status: ${{ steps.changed.outputs.status }}"
+          git diff --staged --quiet || git commit -m "s:${{ steps.analyze.outputs.type }}"
           git push origin main
