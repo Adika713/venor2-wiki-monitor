@@ -5,8 +5,11 @@ on:
     - cron: '* * * * *'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
-  URL: "https://wiki.venor2.hu/"
+  URL: https://wiki.venor2.hu/
   CACHE_KEY: venor2-wiki-state
 
 jobs:
@@ -49,30 +52,61 @@ jobs:
           path: .wiki-state
           key: ${{ env.CACHE_KEY }}
 
-      - name: Változás ellenőrzése és mentése
+      - name: Változás ellenőrzése és status.json frissítése
         id: changed
         run: |
-          if [ "${{ steps.analyze.outputs.type }}" != "content" ]; then
-            echo "changed=false" >> $GITHUB_OUTPUT
-            exit 0
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          STATUS="${{ steps.analyze.outputs.type }}"
+          NEW_HASH="${{ steps.analyze.outputs.hash }}"
+          CHANGED=false
+
+          # check_count olvasása
+          COUNT=0
+          if [ -f docs/status.json ]; then
+            COUNT=$(grep -o '"check_count": [0-9]*' docs/status.json | grep -o '[0-9]*')
+            : ${COUNT:=0}
+          fi
+          COUNT=$((COUNT + 1))
+
+          # last_change megőrzése
+          LAST_CHANGE=""
+          if [ -f docs/status.json ]; then
+            LAST_CHANGE=$(grep -o '"last_change": "[^"]*"' docs/status.json | cut -d'"' -f4)
           fi
 
-          NEW_HASH="${{ steps.analyze.outputs.hash }}"
-
-          if [ -f .wiki-state/hash.txt ]; then
-            OLD_HASH=$(cat .wiki-state/hash.txt)
-            if [ "$NEW_HASH" = "$OLD_HASH" ]; then
-              echo "changed=false" >> $GITHUB_OUTPUT
-              exit 0
+          if [ "$STATUS" = "content" ]; then
+            if [ -f .wiki-state/hash.txt ]; then
+              OLD_HASH=$(cat .wiki-state/hash.txt)
+              if [ "$NEW_HASH" != "$OLD_HASH" ]; then
+                CHANGED=true
+                LAST_CHANGE=$NOW
+              fi
+            else
+              CHANGED=true
+              LAST_CHANGE=$NOW
+            fi
+            mkdir -p .wiki-state
+            echo "$NEW_HASH" > .wiki-state/hash.txt
+          elif [ "$STATUS" = "placeholder" ]; then
+            OLD_STATUS=""
+            if [ -f docs/status.json ]; then
+              OLD_STATUS=$(grep -o '"status": "[^"]*"' docs/status.json | cut -d'"' -f4)
+            fi
+            if [ "$OLD_STATUS" != "placeholder" ]; then
+              CHANGED=true
             fi
           fi
 
-          mkdir -p .wiki-state
-          echo "$NEW_HASH" > .wiki-state/hash.txt
-          echo "changed=true" >> $GITHUB_OUTPUT
+          mkdir -p docs
+          cat > docs/status.json <<EOF
+{"status":"$STATUS","last_check":"$NOW","last_change":"${LAST_CHANGE:-$NOW}","check_count":$COUNT}
+EOF
 
-      - name: Discord értesítés
-        if: steps.changed.outputs.changed == 'true'
+          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+
+      - name: Discord értesítés (ha változott)
+        if: steps.changed.outputs.changed == 'true' && steps.analyze.outputs.type == 'content'
         env:
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
@@ -94,3 +128,11 @@ jobs:
               }]
             }' \
             "$WEBHOOK"
+
+      - name: Változások commit-olása
+        run: |
+          git config user.name "venor2-bot"
+          git config user.email "venor2-bot@users.noreply.github.com"
+          git add docs/status.json
+          git diff --staged --quiet || git commit -m "status: ${{ steps.changed.outputs.status }} [$(date -u +'%H:%M:%S')]"
+          git push origin main
