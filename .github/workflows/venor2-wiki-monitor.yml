@@ -130,6 +130,16 @@ jobs:
           MSG_ID=$(echo "$RESPONSE" | grep -o '"id":"[0-9]*"' | head -1 | cut -d'"' -f4)
           [ -n "$MSG_ID" ] && echo "$MSG_ID" > docs/.msg_id
 
+      - name: Discord ping ha valtozott
+        if: steps.changed.outputs.changed == 'true' && steps.analyze.outputs.type == 'content'
+        run: |
+          curl -s -X POST "${{ env.WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "username": "Venor2 Wiki",
+              "content": "<@1469423126105297019> A wiki frissult! Nezz ra: https://wiki.venor2.hu/"
+            }' > /dev/null
+
       - name: Commit
         run: |
           git config user.name "venor2-bot"
