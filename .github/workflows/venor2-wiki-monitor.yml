@@ -91,23 +91,30 @@ jobs:
           COUNT=$(grep -o '"check_count":[0-9]*' docs/status.json | grep -o '[0-9]*' || echo "0")
 
           if [ "$STATUS" = "content" ]; then
-            COLOR=5763719; STATE_ICON=":green_circle:"; STATE="Van tartalom"
+            C=5763719; I=":green_circle:"; S="Van tartalom"
           else
-            COLOR=15548997; STATE_ICON=":red_circle:"; STATE="Meg nincs tartalom"
+            C=15548997; I=":red_circle:"; S="Meg nincs tartalom"
           fi
 
-          EMBED=$(printf '{"username":"Venor2 Wiki","avatar_url":"https://wiki.venor2.hu/favicon.ico","embeds":[{"title":"Venor2 Wiki Status","color":%s,"thumbnail":{"url":"https://wiki.venor2.hu/favicon.ico"},"fields":[{"name":"Allapot","value":"%s %s","inline":true},{"name":"Utolso ellenorzes","value":"%s","inline":true},{"name":"Ellenorzesek szama","value":"%s","inline":true},{"name":"Link","value":"[wiki.venor2.hu](https://wiki.venor2.hu/)","inline":false}],"footer":{"text":"GitHub Actions | 1 percenkent"},"timestamp":"%s"}]}' "$COLOR" "$STATE_ICON" "$STATE" "$HU_TIME" "$COUNT" "$NOW")
+          jq -n \
+            --arg u "Venor2 Wiki" \
+            --arg a "https://wiki.venor2.hu/favicon.ico" \
+            --arg c $C \
+            --arg i "$I" \
+            --arg s "$S" \
+            --arg t "$NOW" \
+            --arg h "$HU_TIME" \
+            --arg n "$COUNT" \
+            '{username:$u,avatar_url:$a,embeds:[{title:"Venor2 Wiki Status",color:$c|tonumber,thumbnail:{url:$a},fields:[{name:"Allapot",value:($i+" "+$s),inline:true},{name:"Utolso ellenorzes",value:$h,inline:true},{name:"Ellenorzesek szama",value:$n,inline:true},{name:"Link",value:"[wiki.venor2.hu](https://wiki.venor2.hu/)",inline:false}],footer:{text:"GitHub Actions | 1 percenkent"},timestamp:$t}]}' > /tmp/embed.json
 
-          # Régi üzenet törlése
           if [ -f docs/.msg_id ]; then
             OLD_MSG_ID=$(cat docs/.msg_id)
             [ -n "$OLD_MSG_ID" ] && curl -s -X DELETE "${{ env.WEBHOOK }}/messages/$OLD_MSG_ID" > /dev/null || true
           fi
 
-          # Új üzenet küldése, message ID mentése
           RESPONSE=$(curl -s -X POST "${{ env.WEBHOOK }}?wait=true" \
             -H "Content-Type: application/json" \
-            -d "$EMBED")
+            -d @/tmp/embed.json)
           MSG_ID=$(echo "$RESPONSE" | grep -o '"id":"[0-9]*"' | head -1 | cut -d'"' -f4)
           [ -n "$MSG_ID" ] && echo "$MSG_ID" > docs/.msg_id
 
