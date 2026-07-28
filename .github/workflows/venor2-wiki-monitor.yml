@@ -13,30 +13,28 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Oldal letöltése
         id: fetch
         run: |
-          CONTENT=$(curl -sL "${{ env.URL }}" | \
+          curl -sL "${{ env.URL }}" | \
             sed 's/<style[^>]*>.*<\/style>//g' | \
             sed 's/<script[^>]*>.*<\/script>//g' | \
             sed 's/<[^>]*>//g' | \
             sed 's/&nbsp;//g; s/&amp;/\&/g' | \
             tr -s ' ' | \
-            sed 's/^ *//; s/ *$//')
-          echo "content<<EOF" >> $GITHUB_OUTPUT
-          echo "$CONTENT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+            sed 's/^ *//; s/ *$//' > /tmp/wiki-content.txt
+          echo "saved" >> $GITHUB_OUTPUT
 
       - name: Tartalom elemzése
         id: analyze
         run: |
-          TEXT="${{ steps.fetch.outputs.content }}"
+          TEXT=$(cat /tmp/wiki-content.txt)
           LEN=${#TEXT}
           LOWER=$(echo "$TEXT" | tr '[:upper:]' '[:lower:]')
 
-          if echo "$LOWER" | grep -q "hamarosan\|coming soon\|a tudástár épül\|nézz vissza"; then
+          if echo "$LOWER" | grep -q "hamarosan\|coming soon\|a tudastar epul\|nezz vissza"; then
             echo "type=placeholder" >> $GITHUB_OUTPUT
           elif [ $LEN -gt 100 ]; then
             HASH=$(echo "$TEXT" | sha256sum | cut -d' ' -f1)
@@ -48,7 +46,7 @@ jobs:
 
       - name: Utolsó hash betöltése
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .wiki-state
           key: ${{ env.CACHE_KEY }}
@@ -84,14 +82,12 @@ jobs:
             -X POST \
             -d '{
               "username": "Venor2 Wiki Monitor",
-              "avatar_url": "https://i.imgur.com/4M34hi2.png",
               "content": "@everyone",
               "embeds": [{
                 "title": "Venor2 Wiki frissult!",
                 "description": "A wiki tartalma megvaltozott - mar nem a Hamarosan uzenet van!",
                 "url": "https://wiki.venor2.hu/",
                 "color": 5814783,
-                "thumbnail": {"url": "https://wiki.venor2.hu/favicon.ico"},
                 "fields": [
                   {"name": "Link", "value": "https://wiki.venor2.hu/", "inline": false}
                 ],
