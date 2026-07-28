@@ -2,12 +2,8 @@ name: Venor2 Wiki Monitor
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '* * * * *'
   workflow_dispatch:
-
-permissions:
-  contents: read
-  issues: write
 
 env:
   URL: "https://wiki.venor2.hu/"
@@ -62,7 +58,6 @@ jobs:
         run: |
           if [ "${{ steps.analyze.outputs.type }}" != "content" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "Még nincs valódi tartalom."
             exit 0
           fi
 
@@ -72,7 +67,6 @@ jobs:
             OLD_HASH=$(cat .wiki-state/hash.txt)
             if [ "$NEW_HASH" = "$OLD_HASH" ]; then
               echo "changed=false" >> $GITHUB_OUTPUT
-              echo "Ugyanaz a tartalom, nincs változás."
               exit 0
             fi
           fi
@@ -80,34 +74,29 @@ jobs:
           mkdir -p .wiki-state
           echo "$NEW_HASH" > .wiki-state/hash.txt
           echo "changed=true" >> $GITHUB_OUTPUT
-          echo "Tartalom megváltozott! Hash: $NEW_HASH"
 
-      - name: Issue létrehozása (értesítés)
+      - name: Discord értesítés
         if: steps.changed.outputs.changed == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { data: existing } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              labels: ['wiki-frissult']
-            });
-            if (existing.length > 0) {
-              console.log('Már van nyitott issue, nem hozok létre újat.');
-              return;
-            }
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: 'Venor2 Wiki frissult!',
-              body: [
-                'A wiki tartalma megvaltozott – mar nem a "Hamarosan" uzenet van.',
-                '',
-                '👉 ${{ env.URL }}',
-                '',
-                '_(Ezt automatikusan generalta a Venor2 Wiki Monitor.)_'
-              ].join('\n'),
-              labels: ['wiki-frissult']
-            });
-            console.log('Issue letrehozva!');
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          curl -H "Content-Type: application/json" \
+            -X POST \
+            -d '{
+              "username": "Venor2 Wiki Monitor",
+              "avatar_url": "https://i.imgur.com/4M34hi2.png",
+              "content": "@everyone",
+              "embeds": [{
+                "title": "Venor2 Wiki frissult!",
+                "description": "A wiki tartalma megvaltozott - mar nem a Hamarosan uzenet van!",
+                "url": "https://wiki.venor2.hu/",
+                "color": 5814783,
+                "thumbnail": {"url": "https://wiki.venor2.hu/favicon.ico"},
+                "fields": [
+                  {"name": "Link", "value": "https://wiki.venor2.hu/", "inline": false}
+                ],
+                "footer": {"text": "Venor2 Wiki Monitor | GitHub Actions"},
+                "timestamp": "'"$(date -u +"%Y-%m-%dT%H:%M:%SZ")"'"
+              }]
+            }' \
+            "$WEBHOOK"
