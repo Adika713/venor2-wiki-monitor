@@ -10,7 +10,7 @@ permissions:
 
 env:
   URL: https://wiki.venor2.hu/
-  CACHE_KEY: venor2-wiki-state
+  WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
 
 jobs:
   check:
@@ -45,14 +45,7 @@ jobs:
             echo "type=placeholder" >> $GITHUB_OUTPUT
           fi
 
-      - name: Utolsó hash betöltése
-        id: cache
-        uses: actions/cache@v5
-        with:
-          path: .wiki-state
-          key: ${{ env.CACHE_KEY }}
-
-      - name: Változás ellenőrzése és status.json frissítése
+      - name: Változás ellenőrzése és statikus fájlok frissítése
         id: changed
         run: |
           NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -60,79 +53,87 @@ jobs:
           NEW_HASH="${{ steps.analyze.outputs.hash }}"
           CHANGED=false
 
-          # check_count olvasása
+          # check_count
           COUNT=0
-          if [ -f docs/status.json ]; then
-            COUNT=$(grep -o '"check_count": [0-9]*' docs/status.json | grep -o '[0-9]*')
-            : ${COUNT:=0}
-          fi
+          [ -f docs/status.json ] && COUNT=$(grep -o '"check_count":[0-9]*' docs/status.json | grep -o '[0-9]*')
+          : ${COUNT:=0}
           COUNT=$((COUNT + 1))
 
-          # last_change megőrzése
+          # last_change
           LAST_CHANGE=""
-          if [ -f docs/status.json ]; then
-            LAST_CHANGE=$(grep -o '"last_change": "[^"]*"' docs/status.json | cut -d'"' -f4)
-          fi
+          [ -f docs/status.json ] && LAST_CHANGE=$(grep -o '"last_change":"[^"]*"' docs/status.json | cut -d'"' -f4)
 
+          # Változás detektálás
           if [ "$STATUS" = "content" ]; then
-            if [ -f .wiki-state/hash.txt ]; then
-              OLD_HASH=$(cat .wiki-state/hash.txt)
-              if [ "$NEW_HASH" != "$OLD_HASH" ]; then
-                CHANGED=true
-                LAST_CHANGE=$NOW
-              fi
-            else
-              CHANGED=true
-              LAST_CHANGE=$NOW
+            OLD_HASH=""
+            [ -f docs/.hash ] && OLD_HASH=$(cat docs/.hash)
+            if [ "$NEW_HASH" != "$OLD_HASH" ]; then
+              CHANGED=true; LAST_CHANGE=$NOW
             fi
-            mkdir -p .wiki-state
-            echo "$NEW_HASH" > .wiki-state/hash.txt
+            echo "$NEW_HASH" > docs/.hash
           elif [ "$STATUS" = "placeholder" ]; then
             OLD_STATUS=""
-            if [ -f docs/status.json ]; then
-              OLD_STATUS=$(grep -o '"status": "[^"]*"' docs/status.json | cut -d'"' -f4)
-            fi
-            if [ "$OLD_STATUS" != "placeholder" ]; then
-              CHANGED=true
-            fi
+            [ -f docs/status.json ] && OLD_STATUS=$(grep -o '"status":"[^"]*"' docs/status.json | cut -d'"' -f4)
+            [ "$OLD_STATUS" != "placeholder" ] && CHANGED=true
           fi
 
-          mkdir -p docs
-          cat > docs/status.json <<EOF
-{"status":"$STATUS","last_check":"$NOW","last_change":"${LAST_CHANGE:-$NOW}","check_count":$COUNT}
-EOF
+          echo "{\"status\":\"$STATUS\",\"last_check\":\"$NOW\",\"last_change\":\"${LAST_CHANGE:-$NOW}\",\"check_count\":$COUNT}" > docs/status.json
 
           echo "changed=$CHANGED" >> $GITHUB_OUTPUT
           echo "status=$STATUS" >> $GITHUB_OUTPUT
 
-      - name: Discord értesítés (ha változott)
-        if: steps.changed.outputs.changed == 'true' && steps.analyze.outputs.type == 'content'
+      - name: Discord embed frissítése
         env:
-          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          STATUS: ${{ steps.analyze.outputs.type }}
         run: |
-          curl -H "Content-Type: application/json" \
-            -X POST \
-            -d '{
-              "username": "Venor2 Wiki Monitor",
-              "content": "@everyone",
-              "embeds": [{
-                "title": "Venor2 Wiki frissult!",
-                "description": "A wiki tartalma megvaltozott - mar nem a Hamarosan uzenet van!",
-                "url": "https://wiki.venor2.hu/",
-                "color": 5814783,
-                "fields": [
-                  {"name": "Link", "value": "https://wiki.venor2.hu/", "inline": false}
-                ],
-                "footer": {"text": "Venor2 Wiki Monitor | GitHub Actions"},
-                "timestamp": "'"$(date -u +"%Y-%m-%dT%H:%M:%SZ")"'"
-              }]
-            }' \
-            "$WEBHOOK"
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          HU_TIME=$(TZ='Europe/Budapest' date +"%Y.%m.%d %H:%M:%S" 2>/dev/null || date -d '+2 hours' +"%Y.%m.%d %H:%M:%S")
+          COUNT=$(grep -o '"check_count":[0-9]*' docs/status.json | grep -o '[0-9]*' || echo "0")
 
-      - name: Változások commit-olása
+          if [ "$STATUS" = "content" ]; then
+            COLOR=5763719; STATE_ICON=":green_circle:"; STATE="Van tartalom"
+          else
+            COLOR=15548997; STATE_ICON=":red_circle:"; STATE="Meg nincs tartalom"
+          fi
+
+          EMBED=$(cat <<ENDJSON
+        {
+          "username": "Venor2 Wiki",
+          "avatar_url": "https://wiki.venor2.hu/favicon.ico",
+          "embeds": [{
+            "title": "Venor2 Wiki Status",
+            "color": $COLOR,
+            "thumbnail": {"url": "https://wiki.venor2.hu/favicon.ico"},
+            "fields": [
+              {"name": "Allapot", "value": "$STATE_ICON $STATE", "inline": true},
+              {"name": "Utolso ellenorzes", "value": "$HU_TIME", "inline": true},
+              {"name": "Ellenorzesek szama", "value": "$COUNT", "inline": true},
+              {"name": "Link", "value": "[wiki.venor2.hu](https://wiki.venor2.hu/)", "inline": false}
+            ],
+            "footer": {"text": "GitHub Actions | 1 percenkent"},
+            "timestamp": "$NOW"
+          }]
+        }
+        ENDJSON
+        )
+
+          # Régi üzenet törlése
+          if [ -f docs/.msg_id ]; then
+            OLD_MSG_ID=$(cat docs/.msg_id)
+            [ -n "$OLD_MSG_ID" ] && curl -s -X DELETE "${{ env.WEBHOOK }}/messages/$OLD_MSG_ID" > /dev/null || true
+          fi
+
+          # Új üzenet küldése, message ID mentése
+          RESPONSE=$(curl -s -X POST "${{ env.WEBHOOK }}?wait=true" \
+            -H "Content-Type: application/json" \
+            -d "$EMBED")
+          MSG_ID=$(echo "$RESPONSE" | grep -o '"id":"[0-9]*"' | head -1 | cut -d'"' -f4)
+          [ -n "$MSG_ID" ] && echo "$MSG_ID" > docs/.msg_id
+
+      - name: Commit
         run: |
           git config user.name "venor2-bot"
           git config user.email "venor2-bot@users.noreply.github.com"
-          git add docs/status.json
-          git diff --staged --quiet || git commit -m "status: ${{ steps.changed.outputs.status }} [$(date -u +'%H:%M:%S')]"
+          git add docs/status.json docs/.hash docs/.msg_id
+          git diff --staged --quiet || git commit -m "status: ${{ steps.changed.outputs.status }}"
           git push origin main
